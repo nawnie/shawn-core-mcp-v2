@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "source": "PROJECT_NETWORK_CONTRACT.md verified 2026-08-12",
+  "reservations": [
+    {"name": "Victoria website prototype", "port": 4177, "bind": "loopback"},
+    {"name": "Rocky/MyHome workspace", "port": 4182, "bind": "wildcard"},
+    {"name": "Victoria web dev", "port": 5173, "bind": "loopback"},
+    {"name": "PMS container API", "port": 8000, "bind": "container"},
+    {"name": "Chromecast receiver", "port": 8009, "bind": "external"},
+    {"name": "PMS cloud", "port": 8100, "bind": "loopback"},
+    {"name": "PMS edge", "port": 8101, "bind": "loopback"},
+    {"name": "Jellyfin", "port": 8096, "bind": "wildcard"},
+    {"name": "ComfyUI", "port": 8188, "bind": "loopback"},
+    {"name": "Victoria backend", "port": 8765, "bind": "loopback"},
+    {"name": "ReActor Lab", "port": 8766, "bind": "loopback"},
+    {"name": "PhonePcControl", "port": 8787, "bind": "wildcard"},
+    {"name": "Rocky API", "port": 8788, "bind": "loopback"},
+    {"name": "VLC/JARVIS tunnel", "port": 18790, "bind": "loopback"},
+    {"name": "Product Research Studio", "port": 38471, "bind": "loopback"}
+  ]
+}
