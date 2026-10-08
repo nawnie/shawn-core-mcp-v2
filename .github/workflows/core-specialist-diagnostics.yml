@@ -23,4 +23,4 @@ jobs:
       - name: Syntax checks
         run: python -m py_compile nawnie_server.py agent_diagnostics.py specialist_agents.py repair_ledger.py test_agent_diagnostics.py test_repair_ledger.py test_repair_gateway.py
       - name: Isolated diagnostic tests
-        run: python -W error::ResourceWarning -m unittest -v test_agent_diagnostics test_repair_ledger
+        run: python -W error::ResourceWarning -m unittest -v test_agent_diagnostics test_repair_ledger test_repair_gateway
