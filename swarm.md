@@ -50,3 +50,29 @@ After two identical repair attempts without new observation, switch the hypothes
 - "Pokémon agent says it healed but did not": AL audits state extraction, tool result and stale screenshots; Operator tests bounded emulator calls; Verifier checks RAM/UI ground truth after the action.
 - "MCP calls an invalid tool": Core validates tool name/arguments; AL checks model template/parser; Agent T checks that the executor denies unauthorized escalation.
 - "Model OOM on 16GB card": AL measures weight load, KV cache, concurrency and GPU headroom; Wren should not propose frontend fixes.
+
+## Persistent repair lifecycle (staging implementation)
+
+The five `shawn_core_repair_*` MCP tools persist diagnostic work under a local SQLite file. They do NOT automatically run separate agents. Distinguish a **recorded work owner** from a currently running agent and from an authenticated executor.
+
+| Case state | Gate | Typical next owner |
+| --- | --- | --- |
+| `intake` | Stable `request_key`, expected/actual and owner | Nawnie |
+| `investigating` | Start case; record observation, hypothesis and falsifying probe | AL / Wren / specialist |
+| `planned` | `plan` requires all three evidence types | Implementation owner |
+| `awaiting_verification` | `submit` requires a NEW repair artifact receipt since the latest plan | Verifier |
+| `verification_reported` | Current-submission verifier receipt then `accept_report` | Nawnie + teaching record |
+| `blocked` | Explicit `block`; `resume` returns to investigating | Existing owner |
+
+`reject_report` returns to investigation. A rejected attempt does not carry a stale verifier receipt into the next submission. A new plan needs new repair artifact evidence, and a new submission needs a fresh verification reference. `handoff` changes the case's recorded owner only. It is not a permission grant.
+
+### Tool-call example
+
+1. `shawn_core_repair_open({"request_key":"qwen-chat-parser-20261008","project":"Qwen Chat","symptom":"tool result disappears","expected":"parsed result reaches UI","actual":"empty result","owner":"al"})`
+2. Save the returned `case_id` and `revision`. Invoke `shawn_core_repair_transition(... action="start", expected_revision=0, actor="al", event_id="qwen-start-1", reason="collect raw response")`.
+3. Append observation, hypothesis, probe (each with a distinct `event_id` and updated `expected_revision`); move through `plan`, repair receipt, and `submit`.
+4. Verifier records an independent `verification` note with `source_ref` to an actual test result. Only then use `accept_report` or `reject_report`. Treat the state as a *reported result*, not cryptographic or deployment certification.
+5. Append `lesson` after acceptance. Provide the user the measured outcome, a technical explanation, and any remaining uncertainty.
+6. On interruption call `shawn_core_repair_list` then `shawn_core_repair_get`; use the persisted revision to continue without replaying completed side effects.
+
+The ledger uses optimistic concurrency and stable event IDs; a repeated request with the same ID and payload is idempotent. The host still must authorize tool calls, authenticate identity, and redact evidence. Run `python -m unittest -v test_agent_diagnostics test_repair_ledger test_repair_gateway` in the staged checkout; isolated tests alone do not verify installed child MCPs, Codex subprocesses, GPU runtime or Windows configuration.
