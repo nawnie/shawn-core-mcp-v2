@@ -1921,9 +1921,42 @@ def tool_specialist_agent(args: dict[str, Any]) -> dict[str, Any]:
     execute = args.get("execute", False)
     if type(execute) is not bool:
         raise NawnieError("execute must be a boolean")
+    # A persisted case is task context, not a grant of tools or extra authority.
+    case_ref = args.get("case_id")
+    case_revision = None
+    prior_evidence = args.get("evidence", [])
+    if case_ref:
+        if not isinstance(prior_evidence, list) or len(prior_evidence) > 19:
+            raise NawnieError("linked cases require at most 19 explicit evidence entries")
+        try:
+            persisted = RepairLedger().get(case_ref)
+        except ValueError as exc:
+            raise NawnieError(str(exc)) from exc
+        record = persisted["case"]
+        case_revision = record["revision"]
+        context = [
+            "PERSISTED REPAIR CASE " + json.dumps({
+                "case_id": record["case_id"], "project": record["project"],
+                "symptom": record["symptom"][:800],
+                "expected": record["expected"][:350],
+                "actual": record["actual"][:350],
+                "status": record["status"], "revision": case_revision,
+                "primary_owner": record["owner"],
+                "note": "Recorded actor identities are unverified caller claims."
+            }, ensure_ascii=False)[:1990]
+        ]
+        budget = min(8, 20 - len(prior_evidence) - 1)
+        context.extend(
+            ("PRIOR CASE EVENT " + json.dumps({
+                "kind": ev["kind"], "actor": ev["actor"],
+                "body": ev["body"][:1200], "source_ref": ev["source_ref"]
+            }, ensure_ascii=False))[:1990]
+            for ev in persisted["events"][-budget:] if budget > 0
+        )
+        prior_evidence = [*context, *prior_evidence]
     try:
         profile = agent_profile(agent, SPECIALISTS[agent]["role"])
-        prompt = agent_prompt(agent, SPECIALISTS[agent]["role"], task, args.get("evidence", []))
+        prompt = agent_prompt(agent, SPECIALISTS[agent]["role"], task, prior_evidence)
     except ValueError as exc:
         raise NawnieError(str(exc)) from exc
     invoke = {
@@ -1939,6 +1972,8 @@ def tool_specialist_agent(args: dict[str, Any]) -> dict[str, Any]:
         "schema": "shawn-core.specialist-agent.v1",
         "agent": agent,
         "profile": profile,
+        "linked_case_id": case_ref or None,
+        "linked_case_revision": case_revision,
         "execution": output,
         "boundary": "Separate read-only Codex invocation only when execute=true; no persistent agent memory, write access or deployed runtime is implied.",
         "handoff": "Return receipts to Nawnie; acceptance belongs to Verifier.",
@@ -2013,7 +2048,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "shawn_core_context": tool("Return the bounded Shawn Core specialist registry, Nawnie ownership model, AES fallback, and legacy naming policy.", tool_core_context, schema({}), read_only=True),
     "shawn_core_diagnose": tool("Diagnose a failing LLM, MCP tool or agent: rank failure layers, suggest accountable owners and falsifiable probes; never assert a root cause without testing.", tool_diagnose, schema({"symptom": {"type": "string", "minLength": 1, "maxLength": 4000}, "evidence": {"type": "array", "items": {"type": "string", "maxLength": 2000}, "maxItems": 20}}, ["symptom"]), read_only=True),
     "shawn_core_tool_help": tool("Preflight an MCP tool name and JSON object against its advertised schema without executing or correcting arguments.", tool_tool_help, schema({"tool_name": {"type": "string", "minLength": 1, "maxLength": 160}, "arguments_json": {"type": "string", "maxLength": MAX_PROMPT_CHARS, "default": "{}"}}, ["tool_name"]), read_only=True),
-    "shawn_core_specialist_agent": tool("Plan or explicitly run Wren, AL or another specialist as an isolated read-only Codex model invocation with role-specific contracts and proof gates. Default does not execute.", tool_specialist_agent, schema({"agent": {"type": "string", "enum": sorted(SPECIALISTS)}, "task": {"type": "string", "minLength": 1, "maxLength": 8000}, "evidence": {"type": "array", "items": {"type": "string", "maxLength": 2000}, "maxItems": 20}, "model": {"type": "string", "enum": sorted(ALLOWED_MODELS)}, "reasoning_effort": {"type": "string", "enum": sorted(ALLOWED_REASONING)}, "cwd": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT_SECONDS}, "execute": {"type": "boolean", "default": False}}, ["agent", "task"]), read_only=False),
+    "shawn_core_specialist_agent": tool("Plan or explicitly run Wren, AL or another specialist as an isolated read-only Codex model invocation with role-specific contracts and proof gates. Default does not execute.", tool_specialist_agent, schema({"agent": {"type": "string", "enum": sorted(SPECIALISTS)}, "task": {"type": "string", "minLength": 1, "maxLength": 8000}, "evidence": {"type": "array", "items": {"type": "string", "maxLength": 2000}, "maxItems": 20}, "model": {"type": "string", "enum": sorted(ALLOWED_MODELS)}, "reasoning_effort": {"type": "string", "enum": sorted(ALLOWED_REASONING)}, "cwd": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT_SECONDS}, "execute": {"type": "boolean", "default": False}, "case_id": {"type": "string", "minLength": 1, "maxLength": 80}}, ["agent", "task"]), read_only=False),
 
     "shawn_core_repair_open": tool("Open or safely retry a durable specialist repair case with expected vs observed behavior and one implementation owner; no executor is started.", tool_repair_open, schema({"request_key": {"type": "string", "minLength": 1, "maxLength": 100}, "project": {"type": "string", "minLength": 1, "maxLength": 120}, "symptom": {"type": "string", "minLength": 1, "maxLength": 3000}, "expected": {"type": "string", "minLength": 1, "maxLength": 2000}, "actual": {"type": "string", "minLength": 1, "maxLength": 2000}, "owner": {"type": "string", "enum": sorted(set(SPECIALISTS) - {"verifier"})}}, ["request_key", "project", "symptom", "expected", "actual", "owner"]), read_only=False),
     "shawn_core_repair_note": tool("Append an immutable case observation, hypothesis, falsifying probe, change receipt, verifier report or teachable lesson. Requires the current revision and idempotency event ID.", tool_repair_note, schema({"case_id": {"type": "string", "minLength": 1, "maxLength": 80}, "event_id": {"type": "string", "minLength": 1, "maxLength": 120}, "actor": {"type": "string", "enum": sorted(SPECIALISTS)}, "kind": {"type": "string", "enum": ["observation", "hypothesis", "probe", "repair", "verification", "lesson"]}, "body": {"type": "string", "minLength": 1, "maxLength": 4000}, "expected_revision": {"type": "integer", "minimum": 0}, "source_ref": {"type": "string", "maxLength": 400}}, ["case_id", "event_id", "actor", "kind", "body", "expected_revision"]), read_only=False),
