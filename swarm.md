@@ -76,3 +76,7 @@ The five `shawn_core_repair_*` MCP tools persist diagnostic work under a local S
 6. On interruption call `shawn_core_repair_list` then `shawn_core_repair_get`; use the persisted revision to continue without replaying completed side effects.
 
 The ledger uses optimistic concurrency and stable event IDs; a repeated request with the same ID and payload is idempotent. The host still must authorize tool calls, authenticate identity, and redact evidence. Run `python -m unittest -v test_agent_diagnostics test_repair_ledger test_repair_gateway` in the staged checkout; isolated tests alone do not verify installed child MCPs, Codex subprocesses, GPU runtime or Windows configuration.
+
+### Resuming a specialist with evidence
+
+`shawn_core_specialist_agent({"agent":"al","task":"Analyze why HP did not change","case_id":"repair-...","execute":false})` includes a bounded persisted repair-case summary and recent event evidence in the specialist's role-specific prompt. The response names `linked_case_id` and `linked_case_revision`; it does not itself open, revise, execute or accept the case. Other specialists can inspect the context as consultants without implicitly becoming the primary implementation owner. The worker remains ephemeral and read-only by default.
