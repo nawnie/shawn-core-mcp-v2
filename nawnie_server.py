@@ -27,6 +27,7 @@ from typing import Any, Callable
 from port_policy import PortPolicyError, validate_port_request
 from agent_diagnostics import diagnose, preflight_tool_call
 from specialist_agents import agent_profile, agent_prompt
+from repair_ledger import RepairLedger
 
 
 SERVER_NAME = "shawn-core"
@@ -1944,6 +1945,58 @@ def tool_specialist_agent(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _repair_actor(actor: str, *, implementer: bool = False) -> None:
+    if actor not in SPECIALISTS or (implementer and actor == "verifier"):
+        raise NawnieError("unknown or ineligible repair specialist: " + str(actor))
+
+
+def tool_repair_open(args: dict[str, Any]) -> dict[str, Any]:
+    _repair_actor(args["owner"], implementer=True)
+    try:
+        result = RepairLedger().open(**args)
+    except ValueError as exc:
+        raise NawnieError(str(exc)) from exc
+    return {"schema": "shawn-core.repair-case.v1", "record": result,
+            "boundary": "State persistence only, not agent execution or authorization."}
+
+
+def tool_repair_note(args: dict[str, Any]) -> dict[str, Any]:
+    _repair_actor(args["actor"])
+    try:
+        result = RepairLedger().note(**args)
+    except ValueError as exc:
+        raise NawnieError(str(exc)) from exc
+    return {"schema": "shawn-core.repair-event.v1", "record": result}
+
+
+def tool_repair_transition(args: dict[str, Any]) -> dict[str, Any]:
+    _repair_actor(args["actor"])
+    if args.get("new_owner"):
+        _repair_actor(args["new_owner"], implementer=True)
+    try:
+        result = RepairLedger().transition(**args)
+    except ValueError as exc:
+        raise NawnieError(str(exc)) from exc
+    return {"schema": "shawn-core.repair-transition.v1", "record": result,
+            "boundary": "Actor names are caller claims, not authenticated identities. A report cannot grant tool permissions or certify a live deployment."}
+
+
+def tool_repair_get(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"schema": "shawn-core.repair-case.v1", **RepairLedger().get(args["case_id"])}
+    except ValueError as exc:
+        raise NawnieError(str(exc)) from exc
+
+
+def tool_repair_list(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        cases = RepairLedger().list(args.get("limit", 30))
+    except ValueError as exc:
+        raise NawnieError(str(exc)) from exc
+    return {"schema": "shawn-core.repair-cases.v1", "cases": cases}
+
+
 ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
@@ -1961,6 +2014,12 @@ TOOLS: dict[str, dict[str, Any]] = {
     "shawn_core_diagnose": tool("Diagnose a failing LLM, MCP tool or agent: rank failure layers, suggest accountable owners and falsifiable probes; never assert a root cause without testing.", tool_diagnose, schema({"symptom": {"type": "string", "minLength": 1, "maxLength": 4000}, "evidence": {"type": "array", "items": {"type": "string", "maxLength": 2000}, "maxItems": 20}}, ["symptom"]), read_only=True),
     "shawn_core_tool_help": tool("Preflight an MCP tool name and JSON object against its advertised schema without executing or correcting arguments.", tool_tool_help, schema({"tool_name": {"type": "string", "minLength": 1, "maxLength": 160}, "arguments_json": {"type": "string", "maxLength": MAX_PROMPT_CHARS, "default": "{}"}}, ["tool_name"]), read_only=True),
     "shawn_core_specialist_agent": tool("Plan or explicitly run Wren, AL or another specialist as an isolated read-only Codex model invocation with role-specific contracts and proof gates. Default does not execute.", tool_specialist_agent, schema({"agent": {"type": "string", "enum": sorted(SPECIALISTS)}, "task": {"type": "string", "minLength": 1, "maxLength": 8000}, "evidence": {"type": "array", "items": {"type": "string", "maxLength": 2000}, "maxItems": 20}, "model": {"type": "string", "enum": sorted(ALLOWED_MODELS)}, "reasoning_effort": {"type": "string", "enum": sorted(ALLOWED_REASONING)}, "cwd": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT_SECONDS}, "execute": {"type": "boolean", "default": False}}, ["agent", "task"]), read_only=False),
+
+    "shawn_core_repair_open": tool("Open or safely retry a durable specialist repair case with expected vs observed behavior and one implementation owner; no executor is started.", tool_repair_open, schema({"request_key": {"type": "string", "minLength": 1, "maxLength": 100}, "project": {"type": "string", "minLength": 1, "maxLength": 120}, "symptom": {"type": "string", "minLength": 1, "maxLength": 3000}, "expected": {"type": "string", "minLength": 1, "maxLength": 2000}, "actual": {"type": "string", "minLength": 1, "maxLength": 2000}, "owner": {"type": "string", "enum": sorted(set(SPECIALISTS) - {"verifier"})}}, ["request_key", "project", "symptom", "expected", "actual", "owner"]), read_only=False),
+    "shawn_core_repair_note": tool("Append an immutable case observation, hypothesis, falsifying probe, change receipt, verifier report or teachable lesson. Requires the current revision and idempotency event ID.", tool_repair_note, schema({"case_id": {"type": "string", "minLength": 1, "maxLength": 80}, "event_id": {"type": "string", "minLength": 1, "maxLength": 120}, "actor": {"type": "string", "enum": sorted(SPECIALISTS)}, "kind": {"type": "string", "enum": ["observation", "hypothesis", "probe", "repair", "verification", "lesson"]}, "body": {"type": "string", "minLength": 1, "maxLength": 4000}, "expected_revision": {"type": "integer", "minimum": 0}, "source_ref": {"type": "string", "maxLength": 400}}, ["case_id", "event_id", "actor", "kind", "body", "expected_revision"]), read_only=False),
+    "shawn_core_repair_transition": tool("Advance a repair case through evidence/receipt-gated states or explicitly hand off ownership. Claimed actors are not authenticated; no authorization or live success is implied.", tool_repair_transition, schema({"case_id": {"type": "string", "minLength": 1, "maxLength": 80}, "event_id": {"type": "string", "minLength": 1, "maxLength": 120}, "actor": {"type": "string", "enum": sorted(SPECIALISTS)}, "action": {"type": "string", "enum": ["start", "plan", "submit", "accept_report", "reject_report", "block", "resume", "handoff"]}, "expected_revision": {"type": "integer", "minimum": 0}, "reason": {"type": "string", "minLength": 1, "maxLength": 2000}, "new_owner": {"type": "string", "enum": sorted(set(SPECIALISTS) - {"verifier"})}}, ["case_id", "event_id", "actor", "action", "expected_revision", "reason"]), read_only=False),
+    "shawn_core_repair_get": tool("Read a persisted repair case, append-only event history, and outstanding teaching/verification evidence gaps.", tool_repair_get, schema({"case_id": {"type": "string", "minLength": 1, "maxLength": 80}}, ["case_id"]), read_only=True),
+    "shawn_core_repair_list": tool("List up to 100 recent repair cases from the local SQLite ledger; does not open agents.", tool_repair_list, schema({"limit": {"type": "integer", "minimum": 1, "maximum": 100}}), read_only=True),
 
     "shawn_core_query": tool("Create a Shawn Core request envelope, run Nawnie routing, select explicit MCP specialists or AES skills, and return the validation contract. Set mode=plan, or begin a legacy task with /plan, to run Chrono's bounded planning round.", tool_core_query, schema({"task": {"type": "string", "minLength": 1, "maxLength": MAX_PROMPT_CHARS}, "mode": {"type": "string", "enum": ["execute", "plan"], "default": "execute"}, "detail": {"type": "string", "enum": ["full", "compact"], "default": "full"}, "constraints": {"type": "array", "items": {"type": "string"}, "maxItems": 30}, "acceptance_criteria": {"type": "array", "items": {"type": "string"}, "maxItems": 30}}, ["task"]), read_only=True),
     "shawn_core_port_validate": tool("Validate a requested local TCP port against Shawn's fixed project reservations and live listeners. Return the preferred port when safe or the next free port in the caller's approved range without killing, relaunching, forwarding, or changing firewall state.", tool_core_port_validate, schema({"service_name": {"type": "string", "minLength": 1, "maxLength": 160}, "preferred_port": {"type": "integer", "minimum": 1024, "maximum": 65535}, "range_start": {"type": "integer", "minimum": 1024, "maximum": 65535}, "range_end": {"type": "integer", "minimum": 1024, "maximum": 65535}, "bind": {"type": "string", "enum": ["loopback", "wildcard"], "default": "loopback"}, "reservation_name": {"type": "string", "maxLength": 160}}, ["service_name", "preferred_port"]), read_only=True),
@@ -2014,7 +2073,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any] | None:
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-            "instructions": "Shawn Core is the always-on personal gateway unless Shawn opts out. Start with shawn_core_query (detail=compact for routine work). For errors call shawn_core_diagnose and then shawn_core_tool_help for invalid arguments. To run a named specialist in an independent read-only model subprocess, use shawn_core_specialist_agent with execute=true. Nawnie owns routing, durable state and redistribution. Specialists retain their own MCP tools. Use authorized host tools, skills and connectors under Nawnie when no specialist owns a capability. Return bounded results to shawn_core_validate; deterministic receipts gate acceptance.",
+            "instructions": "Shawn Core is the always-on personal gateway unless Shawn opts out. Start with shawn_core_query (detail=compact for routine work). For errors call shawn_core_diagnose and then shawn_core_tool_help for invalid arguments. Use shawn_core_repair_open/note/transition/get to persist owned repair cases, test receipts, handoffs, and a learning note; the host must authenticate specialist identity independently. To run a named specialist in an independent read-only model subprocess, use shawn_core_specialist_agent with execute=true. Nawnie owns routing, durable state and redistribution. Specialists retain their own MCP tools. Use authorized host tools, skills and connectors under Nawnie when no specialist owns a capability. Return bounded results to shawn_core_validate; deterministic receipts gate acceptance.",
         })
     if method == "notifications/initialized":
         return None
