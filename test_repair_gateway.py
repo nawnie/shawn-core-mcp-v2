@@ -49,5 +49,27 @@ class RepairGatewayTests(unittest.TestCase):
         self.assertTrue(wrong_actor["isError"])
         self.assertIn("requires status",wrong_actor["content"][0]["text"])
 
+
+    def test_linked_agent_plan_contains_persisted_evidence_without_executing(self):
+        opened=self.call("shawn_core_repair_open", {"request_key":"case-link","project":"Pokemon","symptom":"agent says healed but HP unchanged","expected":"HP restored","actual":"no HP gain","owner":"al"})
+        cid=opened["structuredContent"]["record"]["case_id"]
+        start=self.call("shawn_core_repair_transition", {"case_id":cid,"event_id":"start-linked-1","actor":"al","action":"start","expected_revision":0,"reason":"verify observations"})
+        self.assertFalse(start["isError"],start)
+        note=self.call("shawn_core_repair_note", {"case_id":cid,"event_id":"obs-linked-1","actor":"al","kind":"observation","body":"screen and RAM disagree","expected_revision":1})
+        self.assertFalse(note["isError"],note)
+        with patch.object(core, "agent_prompt", wraps=core.agent_prompt) as capture:
+            planned=self.call("shawn_core_specialist_agent", {"agent":"al","task":"Explain the failed healing observation","case_id":cid,"execute":False})
+        self.assertFalse(planned["isError"],planned)
+        output=planned["structuredContent"]
+        self.assertEqual(output["linked_case_id"],cid)
+        self.assertEqual(output["linked_case_revision"],2)
+        self.assertEqual(output["execution"]["status"],"planned")
+        included=capture.call_args.args[3]
+        self.assertTrue(any("PERSISTED REPAIR CASE" in line for line in included))
+        self.assertTrue(any("screen and RAM disagree" in line for line in included))
+        absent=self.call("shawn_core_specialist_agent", {"agent":"al","task":"inspect","case_id":"repair-absent","execute":False})
+        self.assertTrue(absent["isError"])
+
+
 if __name__ == "__main__":
     unittest.main()
