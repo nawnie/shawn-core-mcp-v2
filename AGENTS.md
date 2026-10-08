@@ -67,3 +67,7 @@ Give the user a concise, technically precise repair explanation:
 5. **Transferable lesson:** one reusable debugging principle and the next test the user could run unaided.
 
 Do not upgrade the model, retrain, add agents, or grant broader permissions as a substitute for isolating a parser, sensor, tool-execution, state or UI failure.
+
+### Linked specialist-case context
+
+When using `shawn_core_specialist_agent`, pass `case_id` for a previously opened repair case. Its read-only prompt automatically includes the canonical case summary, current revision and bounded recent event receipts. The agent may analyze another owner's evidence but may not claim that it owns the implementation, grant permissions, certify its own fix, or mutate the ledger implicitly. Returning the case ID and revision in the agent response enables explicit follow-up notes/transition calls; there is no automatic state write on agent completion.
