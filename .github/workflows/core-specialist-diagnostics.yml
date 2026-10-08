@@ -6,6 +6,8 @@ on:
       - "agent_diagnostics.py"
       - "specialist_agents.py"
       - "test_agent_diagnostics.py"
+      - "repair_ledger.py"
+      - "test_repair_ledger.py"
       - ".github/workflows/core-specialist-diagnostics.yml"
   workflow_dispatch:
 jobs:
@@ -18,6 +20,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Syntax checks
-        run: python -m py_compile nawnie_server.py agent_diagnostics.py specialist_agents.py test_agent_diagnostics.py
+        run: python -m py_compile nawnie_server.py agent_diagnostics.py specialist_agents.py repair_ledger.py test_agent_diagnostics.py test_repair_ledger.py
       - name: Isolated diagnostic tests
-        run: python -m unittest -v test_agent_diagnostics
+        run: python -W error::ResourceWarning -m unittest -v test_agent_diagnostics test_repair_ledger
