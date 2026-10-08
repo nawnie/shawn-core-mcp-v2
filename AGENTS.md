@@ -42,3 +42,28 @@ Required diagnostic receipt:
 Treat this work as a reviewable **staging branch**. Never overwrite a user's active checkout, local model configuration, agent memory or current deployment without inspecting its exact version/diff.
 
 Changes are done only when source compiles, isolation/tests pass, Verifier signs off and deployed host behavior is observed. A pull request or a model's assertion is not deployment verification. Follow swarm.md for specialist lifecycle and handoffs.
+
+## Durable repair cases and learning contract (staged)
+
+Use the local SQLite-backed repair tools as the continuity ledger for significant debugging work:
+- `shawn_core_repair_open`: call once per incident with a stable caller-supplied `request_key`, project, symptom, expected and actual behavior, and a single implementation owner.
+- `shawn_core_repair_transition` with `action=start` begins investigation. Append `observation`, `hypothesis` and `probe` notes before `plan`; describe a test that could falsify the leading explanation.
+- Record `repair` with a commit/diff/change receipt before `submit`. This is a receipt reference, not permission to execute the repair.
+- A separate Verifier records `verification` with a current test-result reference before `accept_report` or `reject_report`. The receipt must belong to the current submission. The resulting `verification_reported` state is **a stored claim**; the host must authenticate the actor and independently validate actual results.
+- After a reported acceptance, append a `lesson` explaining the failure layer, causal mechanism, how to recognize it, and why the bounded repair worked. `shawn_core_repair_get` exposes missing learning elements and all event history; `shawn_core_repair_list` supports continuation after restart.
+- On a handoff, use an explicit `handoff` transition to change the recorded owner, then pass the exact `case_id`, latest `revision`, and evidence. A handoff **never** changes tool access or authorizes a mutation.
+
+All state mutations require stable `event_id` and current `expected_revision`. Duplicate IDs with identical content are safely reusable; conflicting IDs and stale revisions are rejected. Never put passwords, tokens, customer data, full private logs or sensitive screenshots in this ledger. Token-pattern filtering is best-effort only; callers must redact at source. `SHAWN_CORE_REPAIR_LEDGER` may be set by the trusted host to specify its file path; the MCP client cannot choose a write path.
+
+This is local single-operator continuity, **not** a multi-tenant authorization system, scheduler, autonomous worker process or verified production deployment. The `actor` field in these tools is caller supplied: host-side identity and permission checks remain a deployment prerequisite.
+
+## Every completed repair should teach
+
+Give the user a concise, technically precise repair explanation:
+1. **Observed failure:** expected versus actual, exact runtime/tool/environment where established.
+2. **Root cause:** what was proven and by which discriminating observation; label conjecture clearly.
+3. **Why the fix works:** precise mechanism and layer ownership, not just changed files.
+4. **Regression:** named checks, actual receipts, untested areas and rollback.
+5. **Transferable lesson:** one reusable debugging principle and the next test the user could run unaided.
+
+Do not upgrade the model, retrain, add agents, or grant broader permissions as a substitute for isolating a parser, sensor, tool-execution, state or UI failure.
